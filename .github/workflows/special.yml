@@ -1,0 +1,67 @@
+name: 스페셜 카드 발송
+
+# 명절·기념일 카드를 원할 때 수동으로 한 번 보냅니다. (Actions → 스페셜 카드 발송 → Run workflow)
+on:
+  workflow_dispatch:
+    inputs:
+      title:
+        description: "큰 제목"
+        default: "풍성한 한가위"
+      subtitle:
+        description: "작은 제목"
+        default: "2026 추석"
+      body:
+        description: "인사말 (줄바꿈은 / 로 구분)"
+        default: "보름달처럼 넉넉하고 환한 마음으로/사랑하는 가족과 함께/즐겁고 행복한 추석 보내세요./늘 건강과 행운이 함께하길 바랍니다."
+      photo_url:
+        description: "배경 사진 주소 (Pexels 등)"
+        default: "https://images.pexels.com/photos/35325546/pexels-photo-35325546.jpeg?auto=compress&cs=tinysrgb&w=1600"
+      moon:
+        description: "보름달 넣기"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  send:
+    runs-on: ubuntu-24.04
+    env:
+      TZ: Asia/Seoul
+      CARD_TITLE: ${{ inputs.title }}
+      CARD_SUBTITLE: ${{ inputs.subtitle }}
+      CARD_BODY: ${{ inputs.body }}
+      CARD_PHOTO_URL: ${{ inputs.photo_url }}
+      CARD_MOON: ${{ inputs.moon }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 준비
+        run: |
+          pip install -q requests playwright
+          python -m playwright install --with-deps chromium
+          sudo apt-get install -y -q fonts-noto-cjk > /dev/null
+      - name: 카드 만들기
+        run: python scripts/special_card.py generate
+      - name: 이미지 올리기
+        run: |
+          git config user.name "morning-bot"
+          git config user.email "morning-bot@users.noreply.github.com"
+          git add images
+          git commit -q -m "스페셜 카드 $(date +%F)" && git pull -q --rebase && git push -q
+      - name: 카카오톡 발송
+        env:
+          KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+          KAKAO_CLIENT_SECRET: ${{ secrets.KAKAO_CLIENT_SECRET }}
+          KAKAO_REFRESH_TOKEN: ${{ secrets.KAKAO_REFRESH_TOKEN }}
+        run: python scripts/special_card.py send
+      - name: 카카오 refresh token 자동 갱신
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          f="$RUNNER_TEMP/new_refresh_token"
+          if [ -f "$f" ] && [ -n "$GH_TOKEN" ]; then gh secret set KAKAO_REFRESH_TOKEN --repo "$GITHUB_REPOSITORY" < "$f"; fi
