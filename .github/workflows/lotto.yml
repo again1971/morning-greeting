@@ -1,0 +1,75 @@
+name: 로또 번호 발송
+
+on:
+  schedule:
+    # 매주 금요일 12:00 KST 발송. 예약 실행 지연에 대비해 11:30에 시작해서 12:00까지 기다립니다.
+    - cron: "30 2 * * 5"   # 금 11:30 KST (주 실행)
+    - cron: "55 2 * * 5"   # 금 11:55 KST (예비 — 이미 보냈으면 자동으로 건너뜀)
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "오늘 이미 보냈어도 다시 보내기"
+        type: boolean
+        default: true
+      no_wait:
+        description: "12:00까지 기다리지 말고 바로 보내기"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: kakao-lotto
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      TZ: Asia/Seoul
+      FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force || 'false' }}
+      NO_WAIT: ${{ github.event_name == 'workflow_dispatch' && inputs.no_wait || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 준비
+        run: pip install -q requests
+
+      - name: 추천번호 만들기
+        run: node scripts/lotto.js
+
+      - name: 카카오톡 발송
+        env:
+          KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+          KAKAO_CLIENT_SECRET: ${{ secrets.KAKAO_CLIENT_SECRET }}
+          KAKAO_REFRESH_TOKEN: ${{ secrets.KAKAO_REFRESH_TOKEN }}
+        run: python scripts/lotto_send.py
+
+      - name: 발송 기록 저장
+        run: |
+          git config user.name "morning-bot"
+          git config user.email "morning-bot@users.noreply.github.com"
+          git add state.json
+          git diff --cached --quiet || (git commit -q -m "로또 발송 완료 $(date +%F)" && git pull -q --rebase && git push -q)
+
+      - name: 카카오 refresh token 자동 갱신
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          f="$RUNNER_TEMP/new_refresh_token"
+          if [ -f "$f" ]; then
+            if [ -z "$GH_TOKEN" ]; then echo "::warning::GH_PAT 시크릿이 없어 refresh token을 자동 갱신하지 못했습니다"; exit 0; fi
+            gh secret set KAKAO_REFRESH_TOKEN --repo "$GITHUB_REPOSITORY" < "$f"
+            echo "KAKAO_REFRESH_TOKEN 갱신 완료"
+          fi
