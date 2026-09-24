@@ -1,0 +1,40 @@
+name: 이미지 가져오기
+
+# 카드 배경용 이미지를 주소에서 내려받아 assets/ 폴더에 저장합니다. (Claude 작업용)
+on:
+  workflow_dispatch:
+    inputs:
+      prefix:
+        description: "저장 파일 이름 앞부분"
+        default: "bg"
+      urls:
+        description: "이미지 주소들 (| 로 구분)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: 내려받기
+        env:
+          URLS: ${{ inputs.urls }}
+          PREFIX: ${{ inputs.prefix }}
+        run: |
+          mkdir -p assets
+          i=1
+          IFS='|' read -ra LIST <<< "$URLS"
+          for u in "${LIST[@]}"; do
+            curl -sfL "$u" -o "assets/${PREFIX}${i}.jpg" && echo "ok ${PREFIX}${i}.jpg" || echo "fail $i"
+            i=$((i+1))
+          done
+          ls -la assets
+      - name: 저장
+        run: |
+          git config user.name "morning-bot"
+          git config user.email "morning-bot@users.noreply.github.com"
+          git add assets
+          git diff --cached --quiet || (git commit -q -m "이미지 가져오기" && git pull -q --rebase && git push -q)
