@@ -1,0 +1,82 @@
+name: 아침인사 발송
+
+on:
+  schedule:
+    # GitHub 예약 실행은 몇 분~수십 분 늦게 시작될 수 있어서 06:30 KST에 미리 시작해
+    # 카드를 만들어 두고, 스크립트가 07:00 KST까지 기다렸다가 보냅니다.
+    - cron: "30 21 * * *"   # 06:30 KST (주 실행)
+    - cron: "55 21 * * *"   # 06:55 KST (예비 — 주 실행이 이미 보냈으면 자동으로 건너뜀)
+  workflow_dispatch:        # 수동 실행 버튼
+    inputs:
+      force:
+        description: "오늘 이미 보냈어도 다시 보내기"
+        type: boolean
+        default: true
+      no_wait:
+        description: "07:00까지 기다리지 말고 바로 보내기"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: morning-greeting
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      TZ: Asia/Seoul
+      FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force || 'false' }}
+      NO_WAIT: ${{ github.event_name == 'workflow_dispatch' && inputs.no_wait || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 준비 (패키지/브라우저/한글폰트)
+        run: |
+          pip install -q requests playwright
+          python -m playwright install --with-deps chromium
+          sudo apt-get install -y -q fonts-noto-cjk > /dev/null
+
+      - name: 카드 만들기 (날씨·증시·뉴스 수집 → 이미지)
+        env:
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+        run: python scripts/morning.py generate
+
+      - name: 이미지 올리기
+        run: |
+          git config user.name "morning-bot"
+          git config user.email "morning-bot@users.noreply.github.com"
+          git add images state.json
+          git diff --cached --quiet || (git commit -q -m "아침인사 카드 $(date +%F)" && git push -q)
+
+      - name: 카카오톡 발송
+        env:
+          KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+          KAKAO_CLIENT_SECRET: ${{ secrets.KAKAO_CLIENT_SECRET }}
+          KAKAO_REFRESH_TOKEN: ${{ secrets.KAKAO_REFRESH_TOKEN }}
+        run: python scripts/morning.py send
+
+      - name: 발송 기록 저장
+        run: |
+          git add state.json
+          git diff --cached --quiet || (git commit -q -m "발송 완료 $(date +%F)" && git pull -q --rebase && git push -q)
+
+      - name: 카카오 refresh token 자동 갱신
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          f="$RUNNER_TEMP/new_refresh_token"
+          if [ -f "$f" ]; then
+            if [ -z "$GH_TOKEN" ]; then echo "::warning::GH_PAT 시크릿이 없어 refresh token을 자동 갱신하지 못했습니다"; exit 0; fi
+            gh secret set KAKAO_REFRESH_TOKEN --repo "$GITHUB_REPOSITORY" < "$f"
+            echo "KAKAO_REFRESH_TOKEN 갱신 완료"
+          fi
