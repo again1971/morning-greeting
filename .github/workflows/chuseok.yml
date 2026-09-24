@@ -1,0 +1,43 @@
+name: 추석 카드 발송 (신승묵)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  send:
+    runs-on: ubuntu-24.04
+    env:
+      TZ: Asia/Seoul
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 준비
+        run: |
+          pip install -q requests playwright pillow
+          python -m playwright install --with-deps chromium
+      - name: 카드 만들기
+        run: python scripts/chuseok_card.py
+      - name: 이미지 올리기
+        run: |
+          git config user.name "morning-bot"
+          git config user.email "morning-bot@users.noreply.github.com"
+          git add images
+          git commit -q -m "추석 카드 $(date +%F)" && git pull -q --rebase && git push -q
+      - name: 카카오톡 발송
+        env:
+          KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+          KAKAO_CLIENT_SECRET: ${{ secrets.KAKAO_CLIENT_SECRET }}
+          KAKAO_REFRESH_TOKEN: ${{ secrets.KAKAO_REFRESH_TOKEN }}
+        run: python scripts/special_card.py send
+      - name: 카카오 refresh token 자동 갱신
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          f="$RUNNER_TEMP/new_refresh_token"
+          if [ -f "$f" ] && [ -n "$GH_TOKEN" ]; then gh secret set KAKAO_REFRESH_TOKEN --repo "$GITHUB_REPOSITORY" < "$f"; fi
