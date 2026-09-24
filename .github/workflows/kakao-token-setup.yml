@@ -1,0 +1,39 @@
+name: 카카오 토큰 최초 등록
+
+# 처음 한 번만 사용합니다.
+# 카카오 로그인 후 주소창에 나온 ?code=... 값을 넣고 실행하면
+# refresh token을 받아 KAKAO_REFRESH_TOKEN 시크릿에 자동 저장합니다.
+on:
+  workflow_dispatch:
+    inputs:
+      code:
+        description: "카카오 인가 코드 (주소창의 code= 뒤 값)"
+        required: true
+      redirect_uri:
+        description: "카카오 앱에 등록된 Redirect URI (인가 코드 받을 때 쓴 것과 동일)"
+        required: true
+        default: "https://shinseungmook.app.n8n.cloud/rest/oauth2-credential/callback"
+
+jobs:
+  token:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 인가 코드 → refresh token 교환 후 시크릿 저장
+        env:
+          CODE: ${{ inputs.code }}
+          REDIRECT_URI: ${{ inputs.redirect_uri }}
+          KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+          KAKAO_CLIENT_SECRET: ${{ secrets.KAKAO_CLIENT_SECRET }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          echo "::add-mask::$CODE"
+          args=(-d grant_type=authorization_code -d "client_id=$KAKAO_REST_API_KEY" --data-urlencode "redirect_uri=$REDIRECT_URI" -d "code=$CODE")
+          [ -n "$KAKAO_CLIENT_SECRET" ] && args+=(-d "client_secret=$KAKAO_CLIENT_SECRET")
+          resp=$(curl -s -X POST https://kauth.kakao.com/oauth/token "${args[@]}")
+          rt=$(echo "$resp" | jq -r '.refresh_token // empty')
+          scope=$(echo "$resp" | jq -r '.scope // empty')
+          if [ -z "$rt" ]; then echo "실패: $(echo "$resp" | jq -c '{error, error_description, error_code}')"; exit 1; fi
+          echo "::add-mask::$rt"
+          echo "$rt" | gh secret set KAKAO_REFRESH_TOKEN --repo "$GITHUB_REPOSITORY"
+          echo "성공! KAKAO_REFRESH_TOKEN 저장 완료 (scope: $scope)"
+          echo "$scope" | grep -q talk_message || echo "::warning::talk_message 권한이 scope에 없습니다. 카카오 로그인 시 '카카오톡 메시지 전송' 동의가 필요합니다."
