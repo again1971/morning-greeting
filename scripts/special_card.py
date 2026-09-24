@@ -72,7 +72,8 @@ def cmd_send():
             pass
         time.sleep(3)
     token = kakao_access_token()
-    template = {"object_type": "feed", "content": {"image_url": url, "image_width": 900, "image_height": 1125,
+    template = {"object_type": "feed", "content": {"image_url": url, "image_width": out.get("width", 900),
+                                                   "image_height": out.get("height", 1125),
                                                    "link": {"web_url": url, "mobile_web_url": url}}}
     r = requests.post("https://kapi.kakao.com/v2/api/talk/memo/default/send",
                       headers={"Authorization": f"Bearer {token}"},
