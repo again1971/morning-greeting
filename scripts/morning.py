@@ -402,6 +402,22 @@ def wait_until_7am():
         time.sleep(secs)
 
 
+def cmd_wait():
+    """GitHub 예약 실행은 몇 시간씩 늦게 시작되기도 해서 새벽에 여러 번 일찍 출발시키고,
+    먼저 시작된 실행이 06:58 KST까지 기다렸다가 그때 데이터를 모아 7시에 보냅니다."""
+    if os.environ.get("NO_WAIT") == "true":
+        return
+    today = datetime.now(KST).strftime("%Y-%m-%d")
+    if load_state().get("lastSentDate") == today and os.environ.get("FORCE") != "true":
+        log(f"오늘({today})은 이미 발송됨 → 대기 없이 종료")
+        return
+    now = datetime.now(KST)
+    secs = (now.replace(hour=6, minute=58, second=0, microsecond=0) - now).total_seconds()
+    if 0 < secs < 6 * 3600:
+        log(f"06:58 KST까지 {int(secs)}초 대기")
+        time.sleep(secs)
+
+
 def cmd_send():
     out = json.loads(OUT_FILE.read_text(encoding="utf-8"))
     if out.get("skip"):
@@ -441,4 +457,4 @@ def cmd_send():
 
 
 if __name__ == "__main__":
-    {"generate": cmd_generate, "send": cmd_send}[sys.argv[1]]()
+    {"wait": cmd_wait, "generate": cmd_generate, "send": cmd_send}[sys.argv[1]]()
