@@ -2,9 +2,13 @@ name: 로또 번호 발송
 
 on:
   schedule:
-    # 매주 금요일 12:00 KST 발송. 예약 실행 지연에 대비해 11:30에 시작해서 12:00까지 기다립니다.
-    - cron: "30 2 * * 5"   # 금 11:30 KST (주 실행)
-    - cron: "55 2 * * 5"   # 금 11:55 KST (예비 — 이미 보냈으면 자동으로 건너뜀)
+    # 매주 금요일 12:00 KST 발송. GitHub 예약 실행이 몇 시간씩 늦기도 해서(9/25: 5시간 반 지연)
+    # 금요일 오전에 여러 번 일찍 출발시키고, 먼저 시작된 실행이 12:00까지 기다렸다가 보냅니다.
+    - cron: "7 22 * * 4"   # 금 07:07 KST
+    - cron: "7 23 * * 4"   # 금 08:07 KST
+    - cron: "7 0 * * 5"    # 금 09:07 KST
+    - cron: "7 1 * * 5"    # 금 10:07 KST
+    - cron: "7 2 * * 5"    # 금 11:07 KST
   workflow_dispatch:
     inputs:
       force:
@@ -26,7 +30,7 @@ concurrency:
 jobs:
   send:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 330
     env:
       TZ: Asia/Seoul
       FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force || 'false' }}
