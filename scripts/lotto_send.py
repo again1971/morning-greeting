@@ -1,6 +1,7 @@
 """로또 추천번호 카카오톡 '나에게 보내기' 발송 (카카오 토큰 처리는 morning.py 것을 그대로 사용)"""
 import json
 import os
+import subprocess
 import sys
 import time
 from datetime import datetime
@@ -26,9 +27,14 @@ def main():
     if os.environ.get("NO_WAIT") != "true":  # 금요일 12:00 KST까지 대기
         now = datetime.now(KST)
         secs = (now.replace(hour=12, minute=0, second=0, microsecond=0) - now).total_seconds()
-        if 0 < secs < 3 * 3600:
+        if 0 < secs < 6 * 3600:
             log(f"12:00 KST까지 {int(secs)}초 대기")
             time.sleep(secs)
+        # 기다리는 동안 아침인사 등이 state.json을 바꿨을 수 있으니 최신으로 받고 다시 확인
+        subprocess.run(["git", "pull", "-q", "--rebase"], check=False)
+        if load_state().get("lottoLastSentDate") == today and os.environ.get("FORCE") != "true":
+            log(f"오늘({today})은 이미 로또 번호 발송됨 → 건너뜀")
+            return
 
     token = kakao_access_token()
     template = {
