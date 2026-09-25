@@ -2,10 +2,13 @@ name: 아침인사 발송
 
 on:
   schedule:
-    # GitHub 예약 실행은 몇 분~수십 분 늦게 시작될 수 있어서 06:30 KST에 미리 시작해
-    # 카드를 만들어 두고, 스크립트가 07:00 KST까지 기다렸다가 보냅니다.
-    - cron: "30 21 * * *"   # 06:30 KST (주 실행)
-    - cron: "55 21 * * *"   # 06:55 KST (예비 — 주 실행이 이미 보냈으면 자동으로 건너뜀)
+    # GitHub 예약 실행은 몇 시간씩 늦게 시작되기도 해서(9/25: 2시간 지연) 새벽에 여러 번 일찍 출발시킵니다.
+    # 먼저 시작된 실행이 06:58 KST까지 기다렸다가 데이터를 모아 7시에 보내고, 나머지는 자동으로 건너뜁니다.
+    - cron: "7 18 * * *"    # 03:07 KST
+    - cron: "7 19 * * *"    # 04:07 KST
+    - cron: "7 20 * * *"    # 05:07 KST
+    - cron: "7 21 * * *"    # 06:07 KST
+    - cron: "41 21 * * *"   # 06:41 KST
   workflow_dispatch:        # 수동 실행 버튼
     inputs:
       force:
@@ -27,7 +30,7 @@ concurrency:
 jobs:
   send:
     runs-on: ubuntu-24.04   # 10/19부터 ubuntu-latest가 26으로 바뀌므로 고정
-    timeout-minutes: 60
+    timeout-minutes: 330
     env:
       TZ: Asia/Seoul
       FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force || 'false' }}
@@ -45,6 +48,12 @@ jobs:
           python -m playwright install --with-deps chromium
           sudo apt-get install -y -q fonts-noto-cjk > /dev/null
 
+      - name: 06:58까지 대기
+        run: python scripts/morning.py wait
+
+      - name: 최신 상태 받기
+        run: git pull -q --rebase
+
       - name: 카드 만들기 (날씨·증시·뉴스 수집 → 이미지)
         env:
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
@@ -55,7 +64,7 @@ jobs:
           git config user.name "morning-bot"
           git config user.email "morning-bot@users.noreply.github.com"
           git add images state.json
-          git diff --cached --quiet || (git commit -q -m "아침인사 카드 $(date +%F)" && git push -q)
+          git diff --cached --quiet || (git commit -q -m "아침인사 카드 $(date +%F)" && git pull -q --rebase && git push -q)
 
       - name: 카카오톡 발송
         env:
