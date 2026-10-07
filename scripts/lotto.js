@@ -125,18 +125,89 @@ async function main() {
     return chosen;
   }
 
-  const results = [];
-  const seenThisRun = new Set();
-  let attempts = 0;
-  while (results.length < 5 && attempts < 5000) {
-    attempts += 1;
-    const combo = weightedSample();
-    const key = JSON.stringify([...combo].sort((a, b) => a - b));
-    if (seenThisRun.has(key)) continue;
-    if (!validCombo(combo)) continue;
-    seenThisRun.add(key);
-    results.push([...combo].sort((a, b) => a - b));
+  // ---- 5세트 구성: 핵심번호(고정수) 공유 + 세트 간 중복 제한 (2026-10-07 개편) ----
+  // 1등이 최종 목표지만 2·3등도 함께 노리기 위해, 점수 상위 '핵심번호' 3개를 여러 세트에 공유한다.
+  //  - 1·2세트: 핵심번호 3개 모두 포함 (핵심번호가 나오는 회차에 여러 장이 동시에 등수권에 들도록)
+  //  - 3·4세트: 핵심번호 중 2개씩 (서로 다른 짝)
+  //  - 5세트  : 핵심번호 없이 완전히 다른 조합 (핵심번호가 빗나갈 때의 보험)
+  //  - 어떤 두 세트도 공통 번호는 최대 3개 → 너무 몰리지 않게 분산
+  const MAX_SHARED = 3;
+  const ranked = Object.keys(weights).map(Number).sort((a, b) => weights[b] - weights[a]);
+
+  // 핵심번호: 점수 상위 8개 중에서 가중치 비례로 3개 (매주 조금씩 달라지도록)
+  function pickCore() {
+    const pool = ranked.slice(0, 8);
+    const core = [];
+    while (core.length < 3) {
+      const cand = pool.filter(n => !core.includes(n));
+      const total = cand.reduce((a, n) => a + weights[n], 0);
+      let r = rng() * total, idx = 0;
+      for (; idx < cand.length - 1; idx++) { r -= weights[cand[idx]]; if (r <= 0) break; }
+      core.push(cand[idx]);
+    }
+    return core.sort((a, b) => a - b);
   }
+
+  // fixed 번호를 포함하고, banned 번호는 빼고, 나머지를 가중치 샘플링으로 채움
+  function fillSet(fixed, banned) {
+    const chosen = [...fixed];
+    let pool = [];
+    for (let i = 1; i <= N; i++) if (!chosen.includes(i) && !banned.includes(i)) pool.push(i);
+    let wt = pool.map(i => weights[i]);
+    while (chosen.length < 6) {
+      const total = wt.reduce((a, b) => a + b, 0);
+      const r = rng() * total;
+      let upto = 0, idx = 0;
+      for (; idx < wt.length; idx++) { upto += wt[idx]; if (upto >= r) break; }
+      if (idx >= pool.length) idx = pool.length - 1;
+      chosen.push(pool[idx]);
+      pool.splice(idx, 1); wt.splice(idx, 1);
+    }
+    return chosen.sort((a, b) => a - b);
+  }
+
+  const sharedCount = (a, b) => a.filter(x => b.includes(x)).length;
+
+  function buildSets(core, maxShared) {
+    const [c1, c2, c3] = core;
+    const plan = [
+      { fixed: [c1, c2, c3], banned: [] },
+      { fixed: [c1, c2, c3], banned: [] },
+      { fixed: [c1, c2], banned: [c3] },
+      { fixed: [c2, c3], banned: [c1] },
+      { fixed: [], banned: [c1, c2, c3] },
+    ];
+    const out = [];
+    const keys = new Set();
+    for (const step of plan) {
+      let ok = null;
+      for (let t = 0; t < 4000 && !ok; t++) {
+        const s = fillSet(step.fixed, step.banned);
+        const key = JSON.stringify(s);
+        if (keys.has(key) || !validCombo(s)) continue;
+        if (out.some(o => sharedCount(o, s) > maxShared)) continue;
+        ok = s;
+      }
+      if (!ok) return null;
+      out.push(ok);
+      keys.add(JSON.stringify(ok));
+    }
+    return out;
+  }
+
+  let core = null;
+  let results = null;
+  for (let tries = 0; tries < 30 && !results; tries++) {
+    core = pickCore();
+    results = buildSets(core, MAX_SHARED);
+  }
+  if (!results) { // 안전장치: 조건을 조금 완화
+    for (let tries = 0; tries < 30 && !results; tries++) {
+      core = pickCore();
+      results = buildSets(core, MAX_SHARED + 1);
+    }
+  }
+  if (!results) throw new Error('조건에 맞는 5세트를 만들지 못했습니다');
 
   const drawDate = new Date(draws[draws.length - 1].date);
   const nextDrawDate = new Date(drawDate);
@@ -144,16 +215,17 @@ async function main() {
   const dateStr = `${nextDrawDate.getFullYear()}.${String(nextDrawDate.getMonth() + 1).padStart(2, '0')}.${String(nextDrawDate.getDate()).padStart(2, '0')}`;
 
   const lines = results.map((r, i) => `${i + 1}세트: ${r.join(', ')}`);
+  const coreLine = `핵심번호: ${core.join(', ')} (1~4세트에 공유, 5세트는 별도 조합)`;
   const message =
     `[로또 ${nextRound}회 추천번호]\n` +
     `${dateStr}(토) 추첨분\n\n` +
-    lines.join('\n') +
+    lines.join('\n') + '\n\n' + coreLine +
     `\n\n과거 당첨 데이터 패턴 분석 기반 참고용 조합이며,\n` +
     `당첨을 보장하지 않습니다. 즐거운 한 주 되세요!`;
   // ---- 여기까지 n8n Code 노드와 동일 ----
 
   console.log(message);
-  fs.writeFileSync('lotto_out.json', JSON.stringify({ round: nextRound, draw_date: dateStr, sets: results, message }, null, 2));
+  fs.writeFileSync('lotto_out.json', JSON.stringify({ round: nextRound, draw_date: dateStr, core, sets: results, message }, null, 2));
 }
 
 main().catch(e => { console.error(e); process.exit(1); });
