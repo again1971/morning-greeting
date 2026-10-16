@@ -15,6 +15,23 @@ from morning import KST, ROOT, kakao_access_token, load_state, log, save_state  
 RESULT_URL = "https://www.dhlottery.co.kr/lt645/result"
 
 
+def card_image_url(out):
+    """카드 이미지가 GitHub에 올라가 있으면 그 주소, 없으면 None"""
+    if not out.get("image") or not os.environ.get("GITHUB_REPOSITORY"):
+        return None
+    url = (f"https://raw.githubusercontent.com/{os.environ['GITHUB_REPOSITORY']}/"
+           f"{os.environ.get('GITHUB_REF_NAME', 'main')}/{out['image']}")
+    for _ in range(30):  # push 직후 주소가 열릴 때까지 확인
+        try:
+            if requests.head(url, timeout=10).status_code == 200:
+                return url
+        except Exception:
+            pass
+        time.sleep(3)
+    log("카드 이미지 주소가 열리지 않아 글자로 보냅니다:", url)
+    return None
+
+
 def main():
     today = datetime.now(KST).strftime("%Y-%m-%d")
     state = load_state()
@@ -37,16 +54,34 @@ def main():
             return
 
     token = kakao_access_token()
-    template = {
+    text_template = {
         "object_type": "text",
         "text": out["message"],
         "link": {"web_url": RESULT_URL, "mobile_web_url": RESULT_URL},
     }
-    r = requests.post("https://kapi.kakao.com/v2/api/talk/memo/default/send",
-                      headers={"Authorization": f"Bearer {token}"},
-                      data={"template_object": json.dumps(template, ensure_ascii=False)}, timeout=20)
-    log("카카오 응답:", r.status_code, r.text[:300])
-    if r.status_code != 200 or r.json().get("result_code") != 0:
+    templates = []
+    image_url = card_image_url(out)
+    if image_url:  # 카드 이미지가 있으면 이미지로, 실패하면 글자로
+        templates.append({
+            "object_type": "feed",
+            "content": {
+                "title": f"로또 {out['round']}회 추천번호",
+                "description": f"{out['draw_date']}(토) 추첨 · 핵심번호 {', '.join(map(str, out.get('core', [])))}",
+                "image_url": image_url, "image_width": 900, "image_height": 1125,
+                "link": {"web_url": RESULT_URL, "mobile_web_url": RESULT_URL},
+            },
+            "buttons": [{"title": "당첨결과 보기", "link": {"web_url": RESULT_URL, "mobile_web_url": RESULT_URL}}],
+        })
+    templates.append(text_template)
+
+    for template in templates:
+        r = requests.post("https://kapi.kakao.com/v2/api/talk/memo/default/send",
+                          headers={"Authorization": f"Bearer {token}"},
+                          data={"template_object": json.dumps(template, ensure_ascii=False)}, timeout=20)
+        log(f"카카오 응답({template['object_type']}):", r.status_code, r.text[:300])
+        if r.status_code == 200 and r.json().get("result_code") == 0:
+            break
+    else:
         raise SystemExit("카카오톡 발송 실패")
 
     state = load_state()
