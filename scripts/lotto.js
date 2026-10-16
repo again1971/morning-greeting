@@ -8,12 +8,22 @@
 //     전체·최근 5년·최근 2년 모두에서 기준선(6/45)보다 확실히 낮은 패턴의 번호는 제외
 //     + 최근 1개월(4회) 안에 4번 이상 나온 번호는 항상 제외
 //  4) 지난주 번호 감점은 약하게 (역대 데이터상 지난주 번호도 다시 나올 확률이 다른 번호와 같음)
-//  유지: 역대 1등 조합 제외, 홀짝·합계·연속·구간 필터, 핵심번호 공유 5세트 구조, 세트 간 공통 최대 3개
+//  5) 구간 배분 (2026-10-16 추가): 1~9 / 10~19 / 20~29 / 30~39 / 40~45 다섯 구간 기준
+//     - 한 구간 최대 3개, 빈 구간 최대 2개 (역대 당첨번호의 약 94%가 이 범위)
+//     - 5세트 모양을 역대 비율대로: 빈 구간 0개 1세트, 1개 3세트, 2개 1세트
+//       (역대: 0개 12%, 1개 53%, 2개 32%)
+//  유지: 역대 1등 조합 제외, 홀짝·합계·연속 필터, 핵심번호 공유 5세트 구조, 세트 간 공통 최대 3개
 const N = 45;
 const BASELINE = 6 / 45;
 const W1Y = 52, W6M = 26, W3M = 13, W1M = 4, REST = 2;
 const CORE_ROTATION = 2;          // 직전 몇 회차의 핵심번호를 이번에 제외할지
 const ROTATION_ANCHOR = 1243;     // 순환 계산 시작 회차 (이 회차부터 결정적으로 재계산)
+const zoneOf = n => (n <= 9 ? 0 : n <= 19 ? 1 : n <= 29 ? 2 : n <= 39 ? 3 : 4);
+function zoneCounts(s) {
+  const z = [0, 0, 0, 0, 0];
+  for (const n of s) z[zoneOf(n)]++;
+  return z;
+}
 
 function mulberry32(seed) {
   return function () {
@@ -206,7 +216,9 @@ function recommend(draws) {
       if (s[i] === s[i - 1] + 1) { consec += 1; maxConsec = Math.max(maxConsec, consec); } else consec = 1;
     }
     if (maxConsec > 2) return false;
-    if (new Set(s.map(x => Math.floor((x - 1) / 10))).size < 3) return false;
+    const z = zoneCounts(s);
+    if (Math.max(...z) > 3) return false;                  // 한 구간 최대 3개
+    if (z.filter(v => v === 0).length > 2) return false;  // 빈 구간 최대 2개
     if (historySets.has(JSON.stringify(s))) return false; // 역대 1등 조합 제외
     return true;
   }
@@ -224,14 +236,15 @@ function recommend(draws) {
     return chosen.sort((a, b) => a - b);
   }
   const shared = (a, b) => a.filter(x => b.includes(x)).length;
-  function buildSets(maxShared) {
+  function buildSets(maxShared, useShape) {
     const [c1, c2, c3] = core;
+    // empty: 이 세트의 빈 구간 개수 목표 (역대 비율대로 0개 1세트, 1개 3세트, 2개 1세트)
     const plan = [
-      { fixed: [c1, c2, c3], banned: [] },
-      { fixed: [c1, c2, c3], banned: [] },
-      { fixed: [c1, c2], banned: [c3] },
-      { fixed: [c2, c3], banned: [c1] },
-      { fixed: [], banned: [c1, c2, c3] },
+      { fixed: [c1, c2, c3], banned: [], empty: 1 },
+      { fixed: [c1, c2, c3], banned: [], empty: 0 },
+      { fixed: [c1, c2], banned: [c3], empty: 1 },
+      { fixed: [c2, c3], banned: [c1], empty: 2 },
+      { fixed: [], banned: [c1, c2, c3], empty: 1 },
     ];
     const out = [];
     for (const step of plan) {
@@ -239,6 +252,7 @@ function recommend(draws) {
       for (let t = 0; t < 4000 && !ok; t++) {
         const s = fillSet(step.fixed, step.banned);
         if (!validCombo(s)) continue;
+        if (useShape && zoneCounts(s).filter(v => v === 0).length !== step.empty) continue;
         if (out.some(o => JSON.stringify(o) === JSON.stringify(s) || shared(o, s) > maxShared)) continue;
         ok = s;
       }
@@ -247,7 +261,7 @@ function recommend(draws) {
     }
     return out;
   }
-  const results = buildSets(3) || buildSets(4);
+  const results = buildSets(3, true) || buildSets(4, true) || buildSets(3, false) || buildSets(4, false);
   if (!results) throw new Error('조건에 맞는 5세트를 만들지 못했습니다');
 
   const drawDate = new Date(draws[idx].date);
@@ -256,9 +270,10 @@ function recommend(draws) {
   const dateStr = `${next.getFullYear()}.${String(next.getMonth() + 1).padStart(2, '0')}.${String(next.getDate()).padStart(2, '0')}`;
 
   const excludedList = [...info.excluded].sort((a, b) => a - b);
-  const lines = results.map((r, i) => `${i + 1}세트: ${r.join(', ')}`);
+  const lines = results.map((r, i) => `${i + 1}세트: ${r.join(', ')}  [${zoneCounts(r).join('-')}]`);
   let notes = `핵심번호: ${core.join(', ')}\n(1년·6개월·3개월 공통 강세 + 최근 2주 쉬는 번호, 1~4세트 공유)`;
   if (excludedList.length) notes += `\n제외번호: ${excludedList.join(', ')}`;
+  notes += `\n[ ]는 구간별 개수 (1~9 / 10번대 / 20번대 / 30번대 / 40번대)`;
   const message =
     `[로또 ${nextRound}회 추천번호]\n` +
     `${dateStr}(토) 추첨분\n\n` +
