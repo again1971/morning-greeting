@@ -47,10 +47,22 @@ jobs:
           python-version: "3.12"
 
       - name: 준비
-        run: pip install -q requests
+        run: |
+          pip install -q requests playwright
+          python -m playwright install --with-deps chromium
+          sudo apt-get install -y -q fonts-noto-cjk > /dev/null
 
       - name: 추천번호 만들기
         run: node scripts/lotto.js
+
+      - name: 카드 이미지 만들기 · 올리기
+        continue-on-error: true   # 실패해도 글자 메시지로 발송
+        run: |
+          python scripts/lotto_card.py
+          git config user.name "morning-bot"
+          git config user.email "morning-bot@users.noreply.github.com"
+          git add images
+          git diff --cached --quiet || (git commit -q -m "로또 카드 $(date +%F)" && git pull -q --rebase && git push -q)
 
       - name: 카카오톡 발송
         env:
