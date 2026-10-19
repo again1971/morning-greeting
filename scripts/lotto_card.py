@@ -45,7 +45,7 @@ def build_html(out):
         dots = "".join(
             f'<span class="zd{"" if v else " z0"}" style="background:{ZONES[k][1] if v else "#e9e6df"}">{v}</span>'
             for k, v in enumerate(z))
-        tag = "핵심 3" if core and core.issubset(s) else ("핵심 2" if len(core & set(s)) == 2 else "보험")
+        tag = "핵심 3" if core and core.issubset(s) else ("핵심 2" if len(core & set(s)) == 2 else ("집중" if (out.get("concentration") or {}).get("set_index") == i else "보험"))
         rows.append(f"""
         <div class="row">
           <div class="lbl"><span class="no">{chr(65 + i)}</span><span class="tag">{tag}</span></div>
