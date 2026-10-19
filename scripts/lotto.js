@@ -12,6 +12,13 @@
 //     - 한 구간 최대 3개, 빈 구간 최대 2개 (역대 당첨번호의 약 94%가 이 범위)
 //     - 5세트 모양을 역대 비율대로: 빈 구간 0개 1세트, 1개 3세트, 2개 1세트
 //       (역대: 0개 12%, 1개 53%, 2개 32%)
+//  6) 구간 집중 주기 (2026-10-19 추가, 1246회 20번대 5개 몰림 이후 어게인님 제안)
+//     - '집중' = 한 구간에 4개 이상. 매주 역대 데이터로 다시 계산:
+//       ① 마지막 집중 후 몇 회 지났는지 → 그 간격대에서 실제로 집중이 나온 비율(도래확률)
+//       ② 마지막 집중 구간 → 다음 집중 구간 전이 비율(어느 번대에 몰릴지)
+//       ③ 집중 직후 회차의 모양(직후엔 분산형이 많음: 빈 구간 1개 61%)
+//     - 도래확률이 역대 평균(약 5.8%) 이상이면 5세트를 '집중 대비 세트'로: 예상 구간에 4개 + 다른 구간 2개
+//       (역대 집중 모양 4-1-1 65%, 4-2 26%), 집중 직후·장기 공백 구간처럼 낮으면 기존 규칙 그대로
 //  유지: 역대 1등 조합 제외, 홀짝·합계·연속 필터, 핵심번호 공유 5세트 구조, 세트 간 공통 최대 3개
 const N = 45;
 const BASELINE = 6 / 45;
@@ -163,6 +170,37 @@ function analyze(D, idx, withPatterns) {
   return { weights, excluded, reasons, consensus, coreScore, weak };
 }
 
+// ---- 6) 구간 집중 주기 분석 ----
+const ZONE_NAMES = ['1~9', '10번대', '20번대', '30번대', '40번대'];
+const GAP_BINS = [[1, 1], [2, 5], [6, 10], [11, 15], [16, 20], [21, 30], [31, 9999]];
+function concentrationInfo(draws, idx) {
+  const zs = draws.slice(0, idx + 1).map(d => zoneCounts(d.numbers));
+  const ev = [];
+  zs.forEach((z, i) => { if (Math.max(...z) >= 4) ev.push(i); });
+  const topZone = i => zs[i].indexOf(Math.max(...zs[i]));
+  const avg = ev.length / zs.length;
+  if (ev.length < 10) return { apply: false, avg, prob: avg, gap: null };
+  const gaps = ev.slice(1).map((v, i) => v - ev[i]);
+  const gap = idx - ev[ev.length - 1] + 1;      // 다음 회차가 마지막 집중 후 몇 번째인지
+  const bin = GAP_BINS.find(([lo, hi]) => gap >= lo && gap <= hi);
+  let risk = 0, hit = 0;
+  for (const g of gaps) for (let k = bin[0]; k <= bin[1]; k++) { if (g >= k) risk++; if (g === k) hit++; }
+  const prob = (hit + avg * 5) / (risk + 5);      // 표본이 적으면 평균 쪽으로 당김
+  // 전이: 마지막 집중 구간 → 다음 집중 구간 (전체 비율로 보정)
+  const base = [0, 0, 0, 0, 0];
+  ev.forEach(i => base[topZone(i)]++);
+  const last = topZone(ev[ev.length - 1]);
+  const tr = [0, 0, 0, 0, 0];
+  for (let i = 1; i < ev.length; i++) if (topZone(ev[i - 1]) === last) tr[topZone(ev[i])]++;
+  const trTot = tr.reduce((a, b) => a + b, 0);
+  const zoneProb = tr.map((c, k) => (c + 5 * base[k] / ev.length) / (trTot + 5));
+  const zone = zoneProb.indexOf(Math.max(...zoneProb));
+  return {
+    apply: prob >= avg, avg, prob, gap, lastRound: draws[ev[ev.length - 1]].draw_no,
+    lastZone: last, zone, zoneProb,
+  };
+}
+
 function pickCore(D, idx, info, prevCores, round) {
   const rng = mulberry32(round * 104729 + 7);
   const resting = new Set();
@@ -178,7 +216,10 @@ function pickCore(D, idx, info, prevCores, round) {
   pool = pool.slice(0, 8);
   const core = [];
   while (core.length < 3) {
-    const cand = pool.filter(n => !core.includes(n));
+    // 핵심번호 3개가 연속(예: 7,8,9)이면 '연속 최대 2' 필터에 걸려 세트를 못 만드므로 제외
+    const run3 = n => { const t = [...core, n].sort((a, b) => a - b); return t.length === 3 && t[1] === t[0] + 1 && t[2] === t[1] + 1; };
+    let cand = pool.filter(n => !core.includes(n) && !run3(n));
+    if (!cand.length) cand = pool.filter(n => !core.includes(n));
     core.push(cand[weightedPick(cand, n => info.coreScore[n] + 0.05, rng)]);
   }
   return core.sort((a, b) => a - b);
@@ -206,7 +247,8 @@ function recommend(draws) {
   const weights = info.weights;
 
   const historySets = new Set(draws.map(d => JSON.stringify([...d.numbers].sort((a, b) => a - b))));
-  function validCombo(s) {
+  const conc = concentrationInfo(draws, idx);
+  function validCombo(s, concZone) {
     const odds = s.filter(x => x % 2 === 1).length;
     if (odds < 2 || odds > 4) return false;
     const total = s.reduce((a, b) => a + b, 0);
@@ -217,8 +259,12 @@ function recommend(draws) {
     }
     if (maxConsec > 2) return false;
     const z = zoneCounts(s);
-    if (Math.max(...z) > 3) return false;                  // 한 구간 최대 3개
-    if (z.filter(v => v === 0).length > 2) return false;  // 빈 구간 최대 2개
+    if (concZone !== undefined) {                          // 집중 대비 세트: 지정 구간 정확히 4개
+      if (z[concZone] !== 4 || z.some((v, k) => k !== concZone && v > 2)) return false;
+    } else {
+      if (Math.max(...z) > 3) return false;                  // 한 구간 최대 3개
+      if (z.filter(v => v === 0).length > 2) return false;  // 빈 구간 최대 2개
+    }
     if (historySets.has(JSON.stringify(s))) return false; // 역대 1등 조합 제외
     return true;
   }
@@ -235,8 +281,19 @@ function recommend(draws) {
     }
     return chosen.sort((a, b) => a - b);
   }
+  function fillConc(zone, banned) {
+    const pick = (cands, k) => {
+      const pool = cands.filter(n => !banned.includes(n) && !info.excluded.has(n));
+      const out = [];
+      while (out.length < k && pool.length) { const i = weightedPick(pool, n => weights[n], rng); out.push(pool[i]); pool.splice(i, 1); }
+      return out;
+    };
+    const inZ = [], outZ = [];
+    for (let n = 1; n <= N; n++) (zoneOf(n) === zone ? inZ : outZ).push(n);
+    return [...pick(inZ, 4), ...pick(outZ, 2)].sort((a, b) => a - b);
+  }
   const shared = (a, b) => a.filter(x => b.includes(x)).length;
-  function buildSets(maxShared, useShape) {
+  function buildSets(maxShared, useShape, useConc = conc.apply) {
     const [c1, c2, c3] = core;
     // empty: 이 세트의 빈 구간 개수 목표 (역대 비율대로 0개 1세트, 1개 3세트, 2개 1세트)
     const plan = [
@@ -244,15 +301,17 @@ function recommend(draws) {
       { fixed: [c1, c2, c3], banned: [], empty: 0 },
       { fixed: [c1, c2], banned: [c3], empty: 1 },
       { fixed: [c2, c3], banned: [c1], empty: 2 },
-      { fixed: [], banned: [c1, c2, c3], empty: 1 },
+      useConc
+        ? { fixed: [], banned: [c1, c2, c3], conc: conc.zone }
+        : { fixed: [], banned: [c1, c2, c3], empty: 1 },
     ];
     const out = [];
     for (const step of plan) {
       let ok = null;
       for (let t = 0; t < 4000 && !ok; t++) {
-        const s = fillSet(step.fixed, step.banned);
-        if (!validCombo(s)) continue;
-        if (useShape && zoneCounts(s).filter(v => v === 0).length !== step.empty) continue;
+        const s = step.conc !== undefined ? fillConc(step.conc, step.banned) : fillSet(step.fixed, step.banned);
+        if (s.length !== 6 || !validCombo(s, step.conc)) continue;
+        if (useShape && step.conc === undefined && zoneCounts(s).filter(v => v === 0).length !== step.empty) continue;
         if (out.some(o => JSON.stringify(o) === JSON.stringify(s) || shared(o, s) > maxShared)) continue;
         ok = s;
       }
@@ -261,7 +320,11 @@ function recommend(draws) {
     }
     return out;
   }
-  const results = buildSets(3, true) || buildSets(4, true) || buildSets(3, false) || buildSets(4, false);
+  let results = buildSets(3, true) || buildSets(4, true) || buildSets(3, false) || buildSets(4, false);
+  if (!results && conc.apply) {           // 집중 대비 세트를 못 만들면 기존 규칙으로
+    conc.apply = false;
+    results = buildSets(3, true, false) || buildSets(4, true, false) || buildSets(3, false, false) || buildSets(4, false, false);
+  }
   if (!results) throw new Error('조건에 맞는 5세트를 만들지 못했습니다');
 
   const drawDate = new Date(draws[idx].date);
@@ -273,6 +336,13 @@ function recommend(draws) {
   const lines = results.map((r, i) => `${i + 1}세트: ${r.join(', ')}  [${zoneCounts(r).join('-')}]`);
   let notes = `핵심번호: ${core.join(', ')}\n(1년·6개월·3개월 공통 강세 + 최근 2주 쉬는 번호, 1~4세트 공유)`;
   if (excludedList.length) notes += `\n제외번호: ${excludedList.join(', ')}`;
+  const pct = v => (v * 100).toFixed(1) + '%';
+  if (conc.gap !== null) {
+    notes += `\n구간 집중: 마지막 ${conc.lastRound}회(${ZONE_NAMES[conc.lastZone]}) 후 ${conc.gap}번째 회차, 도래확률 ${pct(conc.prob)}(평균 ${pct(conc.avg)})`;
+    notes += conc.apply
+      ? `\n→ 5세트는 집중 대비 세트(${ZONE_NAMES[conc.zone]} 4개, 예상 ${pct(conc.zoneProb[conc.zone])})`
+      : `\n→ 도래확률이 낮아 집중 대비 세트 없이 분산형으로 구성`;
+  }
   notes += `\n[ ]는 구간별 개수 (1~9 / 10번대 / 20번대 / 30번대 / 40번대)`;
   const message =
     `[로또 ${nextRound}회 추천번호]\n` +
@@ -285,6 +355,7 @@ function recommend(draws) {
     round: nextRound, draw_date: dateStr, core, prev_cores: prevCores,
     consensus: info.consensus, excluded: excludedList, exclude_reasons: info.reasons,
     weak_patterns: info.weak, sets: results, message,
+    concentration: { ...conc, set_index: conc.apply ? 4 : null },
   };
 }
 
