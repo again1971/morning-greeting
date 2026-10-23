@@ -19,6 +19,9 @@
 //       ③ 집중 직후 회차의 모양(직후엔 분산형이 많음: 빈 구간 1개 61%)
 //     - 도래확률이 역대 평균(약 5.8%) 이상이면 5세트를 '집중 대비 세트'로: 예상 구간에 4개 + 다른 구간 2개
 //       (역대 집중 모양 4-1-1 65%, 4-2 26%), 집중 직후·장기 공백 구간처럼 낮으면 기존 규칙 그대로
+//  7) 번호대 배분 (2026-10-23 추가, 어게인님 제안): 역대 당첨번호의 번호대별 개수 비율을 5세트에 나눠 담음
+//     (예: 1~9가 0개 26%·1개 40%·2개 28% → 5세트 중 0개 1세트, 1개 2세트, 2개 2세트). 150번 만들어 가장 가까운 5세트 선택
+//     + 핵심번호 3개는 가능하면 서로 다른 번호대에서 선정
 //  유지: 역대 1등 조합 제외, 홀짝·합계·연속 필터, 핵심번호 공유 5세트 구조, 세트 간 공통 최대 3개
 const N = 45;
 const BASELINE = 6 / 45;
@@ -201,6 +204,31 @@ function concentrationInfo(draws, idx) {
   };
 }
 
+// ---- 7) 5세트 구간 배분 목표: 역대 당첨번호의 번호대별 개수 비율을 5세트에 나눠 담기 ----
+// 예) 1~9가 0개인 회차 26%, 1개 40%, 2개 28% → 5세트 중 0개 1세트, 1개 2세트, 2개 2세트
+function zoneTargets(draws) {
+  const zs = draws.map(d => zoneCounts(d.numbers));
+  return [0, 1, 2, 3, 4].map(k => {
+    const p = [0, 0, 0, 0, 0];
+    zs.forEach(z => p[Math.min(z[k], 4)]++);
+    const want = p.map(v => v / zs.length * 5);
+    const slots = want.map(Math.floor);
+    let left = 5 - slots.reduce((a, b) => a + b, 0);
+    want.map((v, c) => [v - Math.floor(v), c]).sort((a, b) => b[0] - a[0]).slice(0, left).forEach(([, c]) => slots[c]++);
+    const arr = [];
+    slots.forEach((cnt, c) => { for (let i = 0; i < cnt; i++) arr.push(c); });
+    return arr;                                   // 오름차순 5개 (세트별 그 번호대 개수 목표)
+  });
+}
+function zoneScore(sets, targets) {
+  let sc = 0;
+  for (let k = 0; k < 5; k++) {
+    const a = sets.map(s => zoneCounts(s)[k]).sort((x, y) => x - y);
+    a.forEach((v, i) => { sc += Math.abs(v - targets[k][i]); });
+  }
+  return sc;
+}
+
 function pickCore(D, idx, info, prevCores, round) {
   const rng = mulberry32(round * 104729 + 7);
   const resting = new Set();
@@ -220,6 +248,9 @@ function pickCore(D, idx, info, prevCores, round) {
     const run3 = n => { const t = [...core, n].sort((a, b) => a - b); return t.length === 3 && t[1] === t[0] + 1 && t[2] === t[1] + 1; };
     let cand = pool.filter(n => !core.includes(n) && !run3(n));
     if (!cand.length) cand = pool.filter(n => !core.includes(n));
+    // 7) 핵심번호 3개는 가능하면 서로 다른 번호대에서 (한 번대에 몰리면 5세트 구간 비율이 틀어짐)
+    const spread = cand.filter(n => !core.some(c => zoneOf(c) === zoneOf(n)));
+    if (spread.length) cand = spread;
     core.push(cand[weightedPick(cand, n => info.coreScore[n] + 0.05, rng)]);
   }
   return core.sort((a, b) => a - b);
@@ -320,7 +351,16 @@ function recommend(draws) {
     }
     return out;
   }
-  let results = buildSets(3, true) || buildSets(4, true) || buildSets(3, false) || buildSets(4, false);
+  // 7) 여러 번 만들어 보고 번호대별 배분이 역대 비율에 가장 가까운 5세트를 고름
+  const zTargets = zoneTargets(draws);
+  let results = null, bestScore = Infinity;
+  for (let a = 0; a < 150 && bestScore > 0; a++) {
+    const r = buildSets(3, true);
+    if (!r) continue;
+    const sc = zoneScore(r, zTargets);
+    if (sc < bestScore) { bestScore = sc; results = r; }
+  }
+  if (!results) results = buildSets(4, true) || buildSets(3, false) || buildSets(4, false);
   if (!results && conc.apply) {           // 집중 대비 세트를 못 만들면 기존 규칙으로
     conc.apply = false;
     results = buildSets(3, true, false) || buildSets(4, true, false) || buildSets(3, false, false) || buildSets(4, false, false);
@@ -343,6 +383,8 @@ function recommend(draws) {
       ? `\n→ 5세트는 집중 대비 세트(${ZONE_NAMES[conc.zone]} 4개, 예상 ${pct(conc.zoneProb[conc.zone])})`
       : `\n→ 도래확률이 낮아 집중 대비 세트 없이 분산형으로 구성`;
   }
+  const ZN = ['1~9', '10번대', '20번대', '30번대', '40번대'];
+  notes += `\n번호대 합계(5세트): ` + ZN.map((nm, k) => `${nm} ${results.reduce((a, r) => a + zoneCounts(r)[k], 0)}`).join(' · ');
   notes += `\n[ ]는 구간별 개수 (1~9 / 10번대 / 20번대 / 30번대 / 40번대)`;
   const message =
     `[로또 ${nextRound}회 추천번호]\n` +
@@ -356,6 +398,7 @@ function recommend(draws) {
     consensus: info.consensus, excluded: excludedList, exclude_reasons: info.reasons,
     weak_patterns: info.weak, sets: results, message,
     concentration: { ...conc, set_index: conc.apply ? 4 : null },
+    zone_targets: zTargets, zone_score: bestScore,
   };
 }
 
