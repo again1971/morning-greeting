@@ -29,13 +29,13 @@ NUM_FONT = "'DejaVu Sans','Noto Sans CJK KR',sans-serif"   # 숫자 전용: 1·7
 
 
 def ball(n, size=110, core=False):
-    """색 테두리 + 흰 바탕 + 검은 굵은 숫자 (휴대폰에서 작게 보여도 읽히도록, 2026-10-23)"""
+    """예전 광택 공 모양 그대로 + 숫자만 검은 굵은 글씨 (2026-10-23 어게인님 의견)"""
     _, c1, c2 = ZONES[zone_of(n)]
-    ring = int(size * 0.13)
-    outer = (f"box-shadow:0 0 0 5px #fff,0 0 0 11px #e8a33d,0 4px 10px rgba(0,0,0,.18);" if core
-             else "box-shadow:0 3px 8px rgba(0,0,0,.16);")
-    return (f'<div class="ball" style="width:{size}px;height:{size}px;background:{c1};{outer}">'
-            f'<div class="inner" style="inset:{ring}px;font-size:{int(size * 0.5)}px">{n}</div></div>')
+    ring = "box-shadow:0 0 0 5px #fff,0 0 0 11px #e8a33d,0 4px 10px rgba(0,0,0,.18);" if core else \
+        "box-shadow:inset -4px -6px 10px rgba(0,0,0,.12),0 3px 6px rgba(0,0,0,.15);"
+    return (f'<div class="ball" style="width:{size}px;height:{size}px;font-size:{int(size * 0.5)}px;'
+            f'background:radial-gradient(circle at 32% 28%,#ffffffcc 0,#ffffff00 34%),'
+            f'radial-gradient(circle at 50% 50%,{c1} 55%,{c2} 100%);{ring}">{n}</div>')
 
 
 def build_html(out):
@@ -78,9 +78,9 @@ body{{width:{W}px;height:{H}px;font-family:'Noto Sans CJK KR','Noto Sans KR',san
 .tag{{font-size:17px;font-weight:700;color:#7a6a45;background:#f3ecdc;border-radius:20px;padding:2px 9px}}
 .zs{{font-size:15px;color:#9a9284;font-family:{NUM_FONT}}}
 .balls{{display:flex;gap:14px;flex:1;justify-content:space-between;padding:0 12px 0 10px}}
-.ball{{border-radius:50%;position:relative;flex:none}}
-.inner{{position:absolute;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;
-  font-family:{NUM_FONT};font-weight:700;color:#111;letter-spacing:-2px;line-height:1}}
+.ball{{border-radius:50%;display:flex;align-items:center;justify-content:center;flex:none;
+  font-family:{NUM_FONT};font-weight:700;color:#111;letter-spacing:-2px;line-height:1;
+  text-shadow:0 0 3px rgba(255,255,255,.9),0 0 1px #fff}}
 .foot{{margin:24px 44px 0;display:flex;align-items:center;gap:18px}}
 .foot .t{{font-size:28px;font-weight:800;margin-right:6px}}
 .foot .t small{{display:block;font-size:17px;font-weight:500;color:#7a7f8c;margin-top:2px}}
