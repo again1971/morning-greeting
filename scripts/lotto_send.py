@@ -19,8 +19,11 @@ def card_image_url(out):
     """카드 이미지가 GitHub에 올라가 있으면 그 주소, 없으면 None"""
     if not out.get("image") or not os.environ.get("GITHUB_REPOSITORY"):
         return None
+    # 같은 날 다시 보내도 카카오가 예전 이미지를 재사용하지 않도록, 브랜치 이름 대신 커밋 주소 + 시각을 붙임 (2026-10-23)
+    sha = subprocess.run(["git", "log", "-1", "--format=%H", "--", out["image"]],
+                         capture_output=True, text=True).stdout.strip() or os.environ.get("GITHUB_REF_NAME", "main")
     url = (f"https://raw.githubusercontent.com/{os.environ['GITHUB_REPOSITORY']}/"
-           f"{os.environ.get('GITHUB_REF_NAME', 'main')}/{out['image']}")
+           f"{sha}/{out['image']}?v={int(time.time())}")
     for _ in range(30):  # push 직후 주소가 열릴 때까지 확인
         try:
             if requests.head(url, timeout=10).status_code == 200:
