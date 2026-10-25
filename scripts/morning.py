@@ -203,7 +203,7 @@ LANDMARK_QUERIES = [
 def search_photos(query, key):
     try:
         r = get("https://api.pexels.com/v1/search",
-                params={"query": query, "per_page": 15, "orientation": "portrait"},
+                params={"query": query, "per_page": 15, "orientation": "landscape"},
                 headers={"Authorization": key})
         return r.json().get("photos", [])
     except Exception as e:
@@ -227,7 +227,7 @@ def find_scenic_photo(state):
         if fresh:
             state["queryIndex"] = (idx + 1) % n
             remember(fresh["id"])
-            return {"url": fresh["src"]["portrait"], "country": country, "query": query, "photoId": fresh["id"]}
+            return {"url": fresh["src"]["landscape"], "country": country, "query": query, "photoId": fresh["id"]}
     # 모두 소진 시 기록 초기화 후 1회 재시도
     state["usedPhotoIds"] = []
     country, query = LANDMARK_QUERIES[qi % n]
@@ -235,7 +235,7 @@ def find_scenic_photo(state):
     state["queryIndex"] = (qi + 1) % n
     if photos:
         remember(photos[0]["id"])
-        return {"url": photos[0]["src"]["portrait"], "country": country, "query": query, "photoId": photos[0]["id"]}
+        return {"url": photos[0]["src"]["landscape"], "country": country, "query": query, "photoId": photos[0]["id"]}
     return {"url": "", "country": country, "query": query, "photoId": None}
 
 
