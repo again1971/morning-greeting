@@ -22,7 +22,9 @@
 //  7) 번호대 배분 (2026-10-23 추가, 어게인님 제안): 역대 당첨번호의 번호대별 개수 비율을 5세트에 나눠 담음
 //     (예: 1~9가 0개 26%·1개 40%·2개 28% → 5세트 중 0개 1세트, 1개 2세트, 2개 2세트). 150번 만들어 가장 가까운 5세트 선택
 //     + 핵심번호 3개는 가능하면 서로 다른 번호대에서 선정
-//  유지: 역대 1등 조합 제외, 홀짝·합계·연속 필터, 핵심번호 공유 5세트 구조, 세트 간 공통 최대 3개
+//  8) 세트 구성 변경 (2026-10-26, 어게인님 안): 핵심 3개 A세트, 핵심 2개 B·C세트(점수 1위 핵심번호는 둘 다), D·E세트는 핵심 없음
+//     + 핵심번호 외에는 세트끼리 1개 이하로만 겹치게 (5세트가 더 많은 번호를 덮음. 모의 30만 회: 5등 이상 1장↑ 10.9% → 11.5%)
+//  유지: 역대 1등 조합 제외, 홀짝·합계·연속 필터, 세트 간 공통(핵심번호 외) 최대 1개
 const N = 45;
 const BASELINE = 6 / 45;
 const W1Y = 52, W6M = 26, W3M = 13, W1M = 4, REST = 2;
@@ -301,37 +303,42 @@ function recommend(draws) {
   }
 
   const rng = mulberry32(nextRound * 7919 + 13);
-  function fillSet(fixed, banned) {
+  // 8) 이미 다른 세트에 쓴 번호는 덜 뽑히게 (5세트가 최대한 많은 번호를 덮도록)
+  const USED_W = 0.15;
+  function fillSet(fixed, banned, used = new Set()) {
     const chosen = [...fixed];
     const pool = [];
     for (let n = 1; n <= N; n++) if (!chosen.includes(n) && !banned.includes(n) && !info.excluded.has(n)) pool.push(n);
     while (chosen.length < 6) {
-      const i = weightedPick(pool, n => weights[n], rng);
+      const i = weightedPick(pool, n => weights[n] * (used.has(n) ? USED_W : 1), rng);
       chosen.push(pool[i]);
       pool.splice(i, 1);
     }
     return chosen.sort((a, b) => a - b);
   }
-  function fillConc(zone, banned) {
+  function fillConc(zone, banned, used = new Set()) {
     const pick = (cands, k) => {
       const pool = cands.filter(n => !banned.includes(n) && !info.excluded.has(n));
       const out = [];
-      while (out.length < k && pool.length) { const i = weightedPick(pool, n => weights[n], rng); out.push(pool[i]); pool.splice(i, 1); }
+      while (out.length < k && pool.length) { const i = weightedPick(pool, n => weights[n] * (used.has(n) ? USED_W : 1), rng); out.push(pool[i]); pool.splice(i, 1); }
       return out;
     };
     const inZ = [], outZ = [];
     for (let n = 1; n <= N; n++) (zoneOf(n) === zone ? inZ : outZ).push(n);
     return [...pick(inZ, 4), ...pick(outZ, 2)].sort((a, b) => a - b);
   }
-  const shared = (a, b) => a.filter(x => b.includes(x)).length;
+  const shared = (a, b) => a.filter(x => b.includes(x) && !core.includes(x)).length;   // 핵심번호 외에 겹친 개수
   function buildSets(maxShared, useShape, useConc = conc.apply) {
+    // 8) 2026-10-26 변경(어게인님 안): 핵심 3개 1세트, 핵심 2개 2세트, 핵심 없음 2세트
+    //    점수 1위 핵심번호(s1)는 B·C 모두에, 나머지 둘은 하나씩 → s1은 3세트, s2·s3는 2세트
+    const [s1, s2, s3] = [...core].sort((a, b) => info.coreScore[b] - info.coreScore[a]);
     const [c1, c2, c3] = core;
     // empty: 이 세트의 빈 구간 개수 목표 (역대 비율대로 0개 1세트, 1개 3세트, 2개 1세트)
     const plan = [
       { fixed: [c1, c2, c3], banned: [], empty: 1 },
-      { fixed: [c1, c2, c3], banned: [], empty: 0 },
-      { fixed: [c1, c2], banned: [c3], empty: 1 },
-      { fixed: [c2, c3], banned: [c1], empty: 2 },
+      { fixed: [s1, s2], banned: [s3], empty: 0 },
+      { fixed: [s1, s3], banned: [s2], empty: 1 },
+      { fixed: [], banned: [c1, c2, c3], empty: 2 },
       useConc
         ? { fixed: [], banned: [c1, c2, c3], conc: conc.zone }
         : { fixed: [], banned: [c1, c2, c3], empty: 1 },
@@ -340,7 +347,8 @@ function recommend(draws) {
     for (const step of plan) {
       let ok = null;
       for (let t = 0; t < 4000 && !ok; t++) {
-        const s = step.conc !== undefined ? fillConc(step.conc, step.banned) : fillSet(step.fixed, step.banned);
+        const used = new Set(out.flat());
+        const s = step.conc !== undefined ? fillConc(step.conc, step.banned, used) : fillSet(step.fixed, step.banned, used);
         if (s.length !== 6 || !validCombo(s, step.conc)) continue;
         if (useShape && step.conc === undefined && zoneCounts(s).filter(v => v === 0).length !== step.empty) continue;
         if (out.some(o => JSON.stringify(o) === JSON.stringify(s) || shared(o, s) > maxShared)) continue;
@@ -354,16 +362,17 @@ function recommend(draws) {
   // 7) 여러 번 만들어 보고 번호대별 배분이 역대 비율에 가장 가까운 5세트를 고름
   const zTargets = zoneTargets(draws);
   let results = null, bestScore = Infinity;
+  const coverScore = r => 26 - new Set(r.flat()).size;   // 8) 핵심번호 외 겹친 번호 수 (최대 26개 번호 사용)
   for (let a = 0; a < 150 && bestScore > 0; a++) {
-    const r = buildSets(3, true);
+    const r = buildSets(1, true);
     if (!r) continue;
-    const sc = zoneScore(r, zTargets);
+    const sc = zoneScore(r, zTargets) + Math.max(0, coverScore(r));
     if (sc < bestScore) { bestScore = sc; results = r; }
   }
-  if (!results) results = buildSets(4, true) || buildSets(3, false) || buildSets(4, false);
+  if (!results) results = buildSets(2, true) || buildSets(1, false) || buildSets(2, false) || buildSets(3, false);
   if (!results && conc.apply) {           // 집중 대비 세트를 못 만들면 기존 규칙으로
     conc.apply = false;
-    results = buildSets(3, true, false) || buildSets(4, true, false) || buildSets(3, false, false) || buildSets(4, false, false);
+    results = buildSets(1, true, false) || buildSets(2, true, false) || buildSets(2, false, false) || buildSets(3, false, false);
   }
   if (!results) throw new Error('조건에 맞는 5세트를 만들지 못했습니다');
 
@@ -374,7 +383,7 @@ function recommend(draws) {
 
   const excludedList = [...info.excluded].sort((a, b) => a - b);
   const lines = results.map((r, i) => `${i + 1}세트: ${r.join(', ')}  [${zoneCounts(r).join('-')}]`);
-  let notes = `핵심번호: ${core.join(', ')}\n(1년·6개월·3개월 공통 강세 + 최근 2주 쉬는 번호, 1~4세트 공유)`;
+  let notes = `핵심번호: ${core.join(', ')}\n(1년·6개월·3개월 공통 강세 + 최근 2주 쉬는 번호, A~C세트)\n핵심 3개 A세트, 2개 B·C세트, D·E세트는 핵심 없이 겹침 최소 · 사용 번호 ${new Set(results.flat()).size}개`;
   if (excludedList.length) notes += `\n제외번호: ${excludedList.join(', ')}`;
   const pct = v => (v * 100).toFixed(1) + '%';
   if (conc.gap !== null) {
