@@ -1,4 +1,4 @@
-"""로또 추천번호 카드 이미지 만들기 (lotto_out.json → images/YYYY-MM-DD_lotto.png)
+A~C 세트"""로또 추천번호 카드 이미지 만들기 (lotto_out.json → images/YYYY-MM-DD_lotto.png)
 
 공 색깔은 동행복권 홈페이지 색을 따르되, 구간은 어게인님 기준(1~9 / 10번대 / 20번대 / 30번대 / 40번대)
 사용법: python scripts/lotto_card.py [입력 json] [출력 png]
