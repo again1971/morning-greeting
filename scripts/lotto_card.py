@@ -1,4 +1,4 @@
-A~C 세트"""로또 추천번호 카드 이미지 만들기 (lotto_out.json → images/YYYY-MM-DD_lotto.png)
+"""로또 추천번호 카드 이미지 만들기 (lotto_out.json → images/YYYY-MM-DD_lotto.png)
 
 공 색깔은 동행복권 홈페이지 색을 따르되, 구간은 어게인님 기준(1~9 / 10번대 / 20번대 / 30번대 / 40번대)
 사용법: python scripts/lotto_card.py [입력 json] [출력 png]
@@ -96,7 +96,7 @@ body{{width:{W}px;height:{H}px;font-family:'Noto Sans CJK KR','Noto Sans KR',san
   <div class="date">{html.escape(out['draw_date'])}(토)</div>
 </div>
 <div class="board">{''.join(rows)}</div>
-<div class="foot"><div class="t">핵심번호<small>주황 테두리 · A~D 공유</small></div>{core_balls}</div>
+<div class="foot"><div class="t">핵심번호<small>주황 테두리 · A~C 세트</small></div>{core_balls}</div>
 <div class="legend">{legend}<span class="lg" style="margin-left:auto">왼쪽 작은 숫자 = 구간별 개수</span></div>
 {excl_html}
 <div class="note">과거 당첨 데이터 패턴 분석 기반 참고용 조합이며, 당첨을 보장하지 않습니다.</div>
